@@ -115,11 +115,14 @@ void checkLockStateFromAPI() {
 void updateLockState(bool state) {
   digitalWrite(LOCK_PIN, state ? HIGH : LOW); // HIGH = Locked, LOW = Unlocked
   lockState = state;
-   
 
-  if (state) {
-    Serial.println("🔒 Door Locked!");
-  } else {
+  if (!state) { // If unlocked
     Serial.println("🔓 Door Unlocked!");
+    delay(5000); // Wait 5 seconds
+    digitalWrite(LOCK_PIN, HIGH); // Lock again
+    lockState = true;
+    Serial.println("🔒 Door Automatically Locked!");
+  } else {
+    Serial.println("🔒 Door Locked!");
   }
 }
