@@ -7,8 +7,9 @@
 const char* ssid = "gim";
 const char* password = "12345689";
 
-// API URL for lock status
+// API URLs
 const char* API_GET_LOCK_STATE = "http://172.177.169.18:8080/locker/get-status?id=0";
+const char* API_SET_LOCK_STATE = "http://172.177.169.18:8080/locker/set-status?id=0&set=true";
 
 // Define RFID module pins
 #define RST_PIN 4
@@ -116,13 +117,39 @@ void updateLockState(bool state) {
   digitalWrite(LOCK_PIN, state ? HIGH : LOW); // HIGH = Locked, LOW = Unlocked
   lockState = state;
 
-  if (!state) { // If unlocked
+ if (!state) { // If unlocked
     Serial.println("🔓 Door Unlocked!");
+
+    // Send PATCH request **before** waiting 5 seconds
+    sendLockStateUpdate();
+
     delay(5000); // Wait 5 seconds
-    digitalWrite(LOCK_PIN, HIGH); // Lock again
+
+    // Relock the door
+    digitalWrite(LOCK_PIN, HIGH);
     lockState = true;
     Serial.println("🔒 Door Automatically Locked!");
   } else {
     Serial.println("🔒 Door Locked!");
   }
+}
+
+// Function to send API request when lock is relocked
+void sendLockStateUpdate() {
+  HTTPClient http;
+  http.begin(API_SET_LOCK_STATE);
+  http.addHeader("Content-Type", "application/json"); // Set content type
+
+  String jsonPayload = "{\"id\":0, \"set\":true}"; // JSON body
+
+  int httpResponseCode = http.PATCH(jsonPayload); // Send PATCH request
+
+  if (httpResponseCode == 200) {
+    Serial.println("✅ Lock state update sent to API!");
+  } else {
+    Serial.print("❌ Failed to send lock state update! Code: ");
+    Serial.println(httpResponseCode);
+  }
+
+  http.end();
 }
