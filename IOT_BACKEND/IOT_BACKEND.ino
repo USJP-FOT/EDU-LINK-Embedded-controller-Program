@@ -17,13 +17,13 @@ const char* API_SET_LOCK_STATE = "http://172.177.169.18:8080/locker/set-status?i
 
 // Define Lock and Hall Sensor pins
 #define LOCK_PIN 14      // Solenoid lock control
-#define LED_PIN 13       // LED (Controlled by Hall Sensor)
+#define LED_PIN 13       // LED (Only controlled by Hall Sensor)
 #define HALL_SENSOR_PIN 27 // Hall sensor
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 bool lockState = true; // Initially locked
 unsigned long lastApiCheckTime = 0;
-const int apiCheckInterval = 5000; // Check API every 5 seconds
+const int apiCheckInterval = 2000; // Check API every 5 seconds
 
 void setup() {
   Serial.begin(115200);
@@ -51,19 +51,19 @@ void setup() {
 }
 
 void loop() {
-  checkHallSensor();
-  checkRFID();
-  checkLockStateFromAPI();
+  checkHallSensor();  // ✅ Hall sensor now works independently (no API response needed)
+  checkRFID();        
+  checkLockStateFromAPI(); 
 }
 
-// Function to check Hall Sensor (LED Control)
+// ✅ Function to check Hall Sensor (Independent LED Control)
 void checkHallSensor() {
   if (digitalRead(HALL_SENSOR_PIN) == LOW) { 
-    digitalWrite(LED_PIN, LOW);  // LED OFF when magnet detected
-    Serial.println("Hall Sensor Active - LED OFF");
+    digitalWrite(LED_PIN, LOW);  // LED ON when magnet detected
+    Serial.println("🔵 Magnet Not Detected - LED OFF");
   } else {
-    digitalWrite(LED_PIN, HIGH); // LED ON when no magnet
-    Serial.println("Hall Sensor Inactive - LED ON");
+    digitalWrite(LED_PIN, HIGH);// LED OFF when no magnet
+    Serial.println("⚫ Magnet Detected - LED ON");
   }
 }
 
@@ -112,12 +112,12 @@ void checkLockStateFromAPI() {
   }
 }
 
-// Function to update lock state (Does NOT affect LED)
+// ✅ Function to update lock state
 void updateLockState(bool state) {
   digitalWrite(LOCK_PIN, state ? HIGH : LOW); // HIGH = Locked, LOW = Unlocked
   lockState = state;
 
- if (!state) { // If unlocked
+  if (!state) { // If unlocked
     Serial.println("🔓 Door Unlocked!");
 
     // Send PATCH request **before** waiting 5 seconds
@@ -134,7 +134,7 @@ void updateLockState(bool state) {
   }
 }
 
-// Function to send API request when lock is relocked
+// Function to send API request when lock is unlocked
 void sendLockStateUpdate() {
   HTTPClient http;
   http.begin(API_SET_LOCK_STATE);
