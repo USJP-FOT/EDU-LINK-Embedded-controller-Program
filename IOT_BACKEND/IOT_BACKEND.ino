@@ -16,14 +16,17 @@ const char* API_SET_LOCK_STATE = "http://172.177.169.18:8080/locker/set-status?i
 #define SS_PIN 5
 
 // Define Lock and Hall Sensor pins
-#define LOCK_PIN 14      // Solenoid lock control
-#define LED_PIN 13       // LED (Only controlled by Hall Sensor)
+#define LOCK_PIN 14        // Solenoid lock control
+#define LED_PIN 13         // LED controlled by Hall Sensor
 #define HALL_SENSOR_PIN 27 // Hall sensor
 
 MFRC522 rfid(SS_PIN, RST_PIN);
 bool lockState = true; // Initially locked
 unsigned long lastApiCheckTime = 0;
 const int apiCheckInterval = 2000; // Check API every 5 seconds
+
+// Define the authorized RFID card UID (13519FFD)
+byte authorizedUID[] = { 0x13, 0x51, 0x9f, 0xfd };
 
 void setup() {
   Serial.begin(115200);
@@ -59,29 +62,54 @@ void loop() {
 // ✅ Function to check Hall Sensor (Independent LED Control)
 void checkHallSensor() {
   if (digitalRead(HALL_SENSOR_PIN) == LOW) { 
-    digitalWrite(LED_PIN, LOW);  // LED ON when magnet detected
-    Serial.println("🔵 Magnet Not Detected - LED OFF");
+    digitalWrite(LED_PIN, LOW);  // LED OFF when magnet detected
+    Serial.println("🔵 Magnet Detected - LED OFF");
   } else {
-    digitalWrite(LED_PIN, HIGH);// LED OFF when no magnet
-    Serial.println("⚫ Magnet Detected - LED ON");
+    digitalWrite(LED_PIN, HIGH); // LED ON when no magnet
+    Serial.println("⚫ Magnet Not Detected - LED ON");
   }
 }
 
-// Function to check RFID
+// ✅ Function to check RFID card
 void checkRFID() {
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     return; // No new card detected
   }
 
-  Serial.println("🔄 RFID Card Scanned! Checking API...");
+  Serial.print("🔄 RFID Card Scanned! UID: ");
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    Serial.print(rfid.uid.uidByte[i], HEX);
+  }
+  Serial.println();
 
-  checkLockStateFromAPI();
+  // Check if scanned card matches the authorized UID
+  if (isAuthorizedCard()) {
+    Serial.println("✅ Authorized Card! Unlocking...");
+    updateLockState(false); // Unlock the locker
+  } else {
+    Serial.println("❌ Unauthorized Card! Access Denied.");
+  }
 
   // Halt RFID card
   rfid.PICC_HaltA();
 }
 
-// Function to check lock state from API every 5 seconds
+// ✅ Function to check if the scanned RFID card matches the authorized UID
+bool isAuthorizedCard() {
+  if (rfid.uid.size != sizeof(authorizedUID)) {
+    return false; // UID size mismatch
+  }
+
+  for (byte i = 0; i < rfid.uid.size; i++) {
+    if (rfid.uid.uidByte[i] != authorizedUID[i]) {
+      return false; // UID doesn't match
+    }
+  }
+
+  return true; // UID matches
+}
+
+// ✅ Function to check lock state from API every 5 seconds
 void checkLockStateFromAPI() {
   if (millis() - lastApiCheckTime < apiCheckInterval) {
     return; // Only check API every 5 seconds
@@ -134,7 +162,7 @@ void updateLockState(bool state) {
   }
 }
 
-// Function to send API request when lock is unlocked
+// ✅ Function to send API request when lock is unlocked
 void sendLockStateUpdate() {
   HTTPClient http;
   http.begin(API_SET_LOCK_STATE);
