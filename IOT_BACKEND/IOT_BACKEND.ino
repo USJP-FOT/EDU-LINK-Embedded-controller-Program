@@ -11,26 +11,24 @@ const char* password = "12345689";
 const char* API_GET_LOCK_STATE = "http://172.177.169.18:8080/locker/get-status?id=0";
 const char* API_SET_LOCK_STATE = "http://172.177.169.18:8080/locker/set-status?id=0&set=true";
 
-// Define RFID module pins
+// RFID & Hall sensor pins
 #define RST_PIN 4
 #define SS_PIN 5
-
-// Define Lock and Hall Sensor pins
-#define LOCK_PIN 14        // Solenoid lock control
-#define LED_PIN 13         // LED controlled by Hall Sensor
-#define HALL_SENSOR_PIN 27 // Hall sensor
+#define LOCK_PIN 14
+#define LED_PIN 13
+#define HALL_SENSOR_PIN 27
 
 MFRC522 rfid(SS_PIN, RST_PIN);
-bool lockState = true; // Initially locked
+bool lockState = true; // Start locked
 unsigned long lastApiCheckTime = 0;
-const int apiCheckInterval = 2000; // Check API every 5 seconds
+const int apiCheckInterval = 2000; // API check every 5s
 
-// Define the authorized RFID card UID (13519FFD)
-byte authorizedUID[] = { 0x13, 0x51, 0x9f, 0xfd };
+// Authorized RFID UID (Change this to your own)
+const String authorizedUID = "13519FFD"; 
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Initializing...");
+  Serial.println("🔄 Initializing...");
 
   // Connect to WiFi
   WiFi.begin(ssid, password);
@@ -38,10 +36,10 @@ void setup() {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nConnected to WiFi!");
+  Serial.println("\n✅ Connected to WiFi!");
 
-  // Initialize SPI and RFID module
-  SPI.begin(18, 19, 23);
+  // Initialize SPI and RFID
+  SPI.begin();
   rfid.PCD_Init();
   
   // Set pin modes
@@ -49,111 +47,111 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(HALL_SENSOR_PIN, INPUT);
 
-  // Start with locked state
+  // Start in locked state
   updateLockState(true);
 }
 
 void loop() {
-  checkHallSensor();  // ✅ Hall sensor now works independently (no API response needed)
+  checkHallSensor();  
   checkRFID();        
   checkLockStateFromAPI(); 
 }
 
-// ✅ Function to check Hall Sensor (Independent LED Control)
+// ✅ Hall sensor LED control
 void checkHallSensor() {
   if (digitalRead(HALL_SENSOR_PIN) == LOW) { 
-    digitalWrite(LED_PIN, LOW);  // LED OFF when magnet detected
-    Serial.println("🔵 Magnet Detected - LED OFF");
+    digitalWrite(LED_PIN, LOW);  
+    Serial.println("⚫ Magnet Detected - LED OFF");
   } else {
-    digitalWrite(LED_PIN, HIGH); // LED ON when no magnet
-    Serial.println("⚫ Magnet Not Detected - LED ON");
+    digitalWrite(LED_PIN, HIGH);
+    Serial.println("🔵 Magnet Not Detected - LED ON");
   }
 }
 
-// ✅ Function to check RFID card
+// ✅ RFID checking
 void checkRFID() {
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
-    return; // No new card detected
+    return;
   }
 
-  Serial.print("🔄 RFID Card Scanned! UID: ");
+  // Read scanned card UID
+  String scannedUID = "";
   for (byte i = 0; i < rfid.uid.size; i++) {
-    Serial.print(rfid.uid.uidByte[i], HEX);
+    scannedUID += String(rfid.uid.uidByte[i], HEX);
   }
-  Serial.println();
+  scannedUID.toUpperCase();
 
-  // Check if scanned card matches the authorized UID
-  if (isAuthorizedCard()) {
-    Serial.println("✅ Authorized Card! Unlocking...");
-    updateLockState(false); // Unlock the locker
+  Serial.print("🔄 Scanned Card UID: ");
+  Serial.println(scannedUID);
+
+  // Check if scanned UID matches authorized UID
+  if (scannedUID == authorizedUID) { 
+    Serial.println("✅ Authorized Card Detected!");
+
+    // Toggle lock and LED states
+    lockState = !lockState; 
+
+    if (lockState) {
+      // Unlock the door
+     // digitalWrite(LED_PIN, HIGH);  // LED ON
+      digitalWrite(LOCK_PIN, LOW);
+      delay(5000);  
+      digitalWrite(LOCK_PIN, HIGH);
+      lockState = !lockState; // Relay ON (active-low unlock)
+      Serial.println("🔓 LED ON: Door Unlocked.");
+    }else {
+      // Lock the door
+      //digitalWrite(LED_PIN, LOW);   // LED OFF
+     digitalWrite(LOCK_PIN, LOW); // Relay OFF (active-low lock)
+      Serial.println("🔒 LED OFF: Door Locked.");
+    }
+    delay(500); // Debounce delay
   } else {
-    Serial.println("❌ Unauthorized Card! Access Denied.");
+    Serial.println("❌ Access Denied!");
   }
 
-  // Halt RFID card
+  // Halt the RFID card
   rfid.PICC_HaltA();
 }
 
-// ✅ Function to check if the scanned RFID card matches the authorized UID
-bool isAuthorizedCard() {
-  if (rfid.uid.size != sizeof(authorizedUID)) {
-    return false; // UID size mismatch
-  }
-
-  for (byte i = 0; i < rfid.uid.size; i++) {
-    if (rfid.uid.uidByte[i] != authorizedUID[i]) {
-      return false; // UID doesn't match
-    }
-  }
-
-  return true; // UID matches
-}
-
-// ✅ Function to check lock state from API every 5 seconds
+// ✅ API lock state check (every 5s)
 void checkLockStateFromAPI() {
   if (millis() - lastApiCheckTime < apiCheckInterval) {
-    return; // Only check API every 5 seconds
+    return;
   }
-
-  lastApiCheckTime = millis(); // Update last check time
+  lastApiCheckTime = millis();
 
   HTTPClient http;
   http.begin(API_GET_LOCK_STATE);
-
   int httpResponseCode = http.GET();
-  if (httpResponseCode == 200) { // If request is successful
+
+  if (httpResponseCode == 200) {
     String response = http.getString();
     Serial.print("🔍 API Response: ");
     Serial.println(response);
     
     http.end();
 
-    bool apiStatus = (response == "true"); // true = locked, false = unlocked
-    if (apiStatus != lockState) { // Only update if state changes
+    bool apiStatus = (response == "true");
+    if (apiStatus != lockState) {
       updateLockState(apiStatus);
     }
   } else {
     Serial.print("❌ API Request Failed! Code: ");
     Serial.println(httpResponseCode);
-    
     http.end();
   }
 }
 
-// ✅ Function to update lock state
+// ✅ Lock state update
 void updateLockState(bool state) {
-  digitalWrite(LOCK_PIN, state ? HIGH : LOW); // HIGH = Locked, LOW = Unlocked
+  digitalWrite(LOCK_PIN, state ? HIGH : LOW);
   lockState = state;
 
-  if (!state) { // If unlocked
+  if (!state) {
     Serial.println("🔓 Door Unlocked!");
-
-    // Send PATCH request **before** waiting 5 seconds
     sendLockStateUpdate();
-
-    delay(5000); // Wait 5 seconds
-
-    // Relock the door
+    delay(5000);
     digitalWrite(LOCK_PIN, HIGH);
     lockState = true;
     Serial.println("🔒 Door Automatically Locked!");
@@ -162,15 +160,14 @@ void updateLockState(bool state) {
   }
 }
 
-// ✅ Function to send API request when lock is unlocked
+// ✅ Send lock update to API
 void sendLockStateUpdate() {
   HTTPClient http;
   http.begin(API_SET_LOCK_STATE);
-  http.addHeader("Content-Type", "application/json"); // Set content type
+  http.addHeader("Content-Type", "application/json");
 
-  String jsonPayload = "{\"id\":0, \"set\":true}"; // JSON body
-
-  int httpResponseCode = http.PATCH(jsonPayload); // Send PATCH request
+  String jsonPayload = "{\"id\":0, \"set\":true}";
+  int httpResponseCode = http.PATCH(jsonPayload);
 
   if (httpResponseCode == 200) {
     Serial.println("✅ Lock state update sent to API!");
@@ -178,6 +175,5 @@ void sendLockStateUpdate() {
     Serial.print("❌ Failed to send lock state update! Code: ");
     Serial.println(httpResponseCode);
   }
-
   http.end();
 }
