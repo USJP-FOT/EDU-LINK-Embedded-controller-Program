@@ -21,7 +21,7 @@ const char* API_SET_LOCK_STATE = "http://172.177.169.18:8080/locker/set-status?i
 MFRC522 rfid(SS_PIN, RST_PIN);
 bool lockState = true; // Start locked
 unsigned long lastApiCheckTime = 0;
-const int apiCheckInterval = 2000; // API check every 5s
+const int apiCheckInterval = 2000; // API check every 2s
 
 // Authorized RFID UID (Change this to your own)
 const String authorizedUID = "13519FFD"; 
@@ -88,22 +88,23 @@ void checkRFID() {
   if (scannedUID == authorizedUID) { 
     Serial.println("✅ Authorized Card Detected!");
 
-    // Toggle lock and LED states
+    // Toggle lock state **BEFORE** setting pin values
     lockState = !lockState; 
 
-    if (lockState) {
+    if (!lockState) { 
       // Unlock the door
-     // digitalWrite(LED_PIN, HIGH);  // LED ON
-      digitalWrite(LOCK_PIN, LOW);
+      digitalWrite(LOCK_PIN, LOW);  // Relay ON (active-low unlock)
+      Serial.println("🔓 Door Unlocked.");
+      
+      // Automatically lock after 5 seconds
       delay(5000);  
-      digitalWrite(LOCK_PIN, HIGH);
-      lockState = !lockState; // Relay ON (active-low unlock)
-      Serial.println("🔓 LED ON: Door Unlocked.");
-    }else {
-      // Lock the door
-      //digitalWrite(LED_PIN, LOW);   // LED OFF
-     digitalWrite(LOCK_PIN, LOW); // Relay OFF (active-low lock)
-      Serial.println("🔒 LED OFF: Door Locked.");
+      digitalWrite(LOCK_PIN, HIGH); // Relay OFF (active-low lock)
+      lockState = true;
+      Serial.println("🔒 Door Automatically Locked!");
+    } else {
+      // Lock the door manually
+      digitalWrite(LOCK_PIN, HIGH); // Relay OFF (active-low lock)
+      Serial.println("🔒 Door Locked.");
     }
     delay(500); // Debounce delay
   } else {
@@ -114,7 +115,7 @@ void checkRFID() {
   rfid.PICC_HaltA();
 }
 
-// ✅ API lock state check (every 5s)
+// ✅ API lock state check (every 2s)
 void checkLockStateFromAPI() {
   if (millis() - lastApiCheckTime < apiCheckInterval) {
     return;
@@ -145,14 +146,14 @@ void checkLockStateFromAPI() {
 
 // ✅ Lock state update
 void updateLockState(bool state) {
-  digitalWrite(LOCK_PIN, state ? HIGH : LOW);
   lockState = state;
+  digitalWrite(LOCK_PIN, state ? HIGH : LOW);
 
   if (!state) {
     Serial.println("🔓 Door Unlocked!");
     sendLockStateUpdate();
     delay(5000);
-    digitalWrite(LOCK_PIN, HIGH);
+    digitalWrite(LOCK_PIN, HIGH); // Lock again after 5s
     lockState = true;
     Serial.println("🔒 Door Automatically Locked!");
   } else {
