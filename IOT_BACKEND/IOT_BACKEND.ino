@@ -4,8 +4,8 @@
 #include <MFRC522.h>
 
 // WiFi credentials
-const char* ssid = "gim";
-const char* password = "12345689";
+const char* ssid = "ZLT S10_165310";
+const char* password = "Abhi37304";
 
 // API URLs
 const char* API_GET_LOCK_STATE = "http://172.177.169.18:8080/locker/get-status?id=0";
@@ -42,6 +42,9 @@ void setup() {
   SPI.begin();
   rfid.PCD_Init();
   
+  // Set SPI speed to 4 MHz for faster communication
+  SPI.setFrequency(4000000);
+
   // Set pin modes
   pinMode(LOCK_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
@@ -70,6 +73,7 @@ void checkHallSensor() {
 
 // ✅ RFID checking
 void checkRFID() {
+  // Only check for a new card if there’s no ongoing scan
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     return;
   }
@@ -106,7 +110,6 @@ void checkRFID() {
       digitalWrite(LOCK_PIN, HIGH); // Relay OFF (active-low lock)
       Serial.println("🔒 Door Locked.");
     }
-    delay(500); // Debounce delay
   } else {
     Serial.println("❌ Access Denied!");
   }
@@ -168,7 +171,7 @@ void sendLockStateUpdate() {
   http.addHeader("Content-Type", "application/json");
 
   String jsonPayload = "{\"id\":0, \"set\":true}";
-  int httpResponseCode = http.PATCH(jsonPayload);
+  int httpResponseCode = http.PUT(jsonPayload);
 
   if (httpResponseCode == 200) {
     Serial.println("✅ Lock state update sent to API!");
