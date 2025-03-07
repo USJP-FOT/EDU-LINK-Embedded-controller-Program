@@ -1,4 +1,4 @@
-#include <WiFi.h>
+ #include <WiFi.h>
 #include <HTTPClient.h>
 #include <SPI.h>
 #include <MFRC522.h>
@@ -10,6 +10,7 @@ const char* password = "Abhi37304";
 // API URLs
 const char* API_GET_LOCK_STATE = "http://172.177.169.18:8080/locker/get-status?id=0";
 const char* API_SET_LOCK_STATE = "http://172.177.169.18:8080/locker/set-status?id=0&set=true";
+const char* API_SET_PEN_STATUS = "http://172.177.169.18:8080/locker/set-pen-status?id=0&set="; 
 
 // RFID & Hall sensor pins
 #define RST_PIN 4
@@ -19,11 +20,12 @@ const char* API_SET_LOCK_STATE = "http://172.177.169.18:8080/locker/set-status?i
 #define HALL_SENSOR_PIN 27
 
 MFRC522 rfid(SS_PIN, RST_PIN);
-bool lockState = true; // Start locked
+bool lockState = true;
+bool lastPenState = false;
 unsigned long lastApiCheckTime = 0;
-const int apiCheckInterval = 2000; // API check every 2s
+const int apiCheckInterval = 2000;
 
-// Authorized RFID UID (Change this to your own)
+// Authorized RFID UID
 const String authorizedUID = "13519FFD"; 
 
 void setup() {
@@ -33,7 +35,7 @@ void setup() {
   // Connect to WiFi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(100);
     Serial.print(".");
   }
   Serial.println("\n✅ Connected to WiFi!");
@@ -42,43 +44,29 @@ void setup() {
   SPI.begin();
   rfid.PCD_Init();
   
-  // Set SPI speed to 4 MHz for faster communication
-  SPI.setFrequency(4000000);
+  // Increase SPI speed for faster RFID reading
+  //SPI.setFrequency(10000000);  // 10MHz (faster RFID reading)
 
   // Set pin modes
   pinMode(LOCK_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
   pinMode(HALL_SENSOR_PIN, INPUT);
 
-  // Start in locked state
   updateLockState(true);
 }
 
 void loop() {
-  checkHallSensor();  
-  checkRFID();        
+  checkRFID();         // **Give priority to RFID**
+  checkHallSensor();   
   checkLockStateFromAPI(); 
 }
 
-// ✅ Hall sensor LED control
-void checkHallSensor() {
-  if (digitalRead(HALL_SENSOR_PIN) == LOW) { 
-    digitalWrite(LED_PIN, LOW);  
-    Serial.println("⚫ Magnet Detected - LED OFF");
-  } else {
-    digitalWrite(LED_PIN, HIGH);
-    Serial.println("🔵 Magnet Not Detected - LED ON");
-  }
-}
-
-// ✅ RFID checking
+// ✅ Faster RFID Check
 void checkRFID() {
-  // Only check for a new card if there’s no ongoing scan
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) {
     return;
   }
 
-  // Read scanned card UID
   String scannedUID = "";
   for (byte i = 0; i < rfid.uid.size; i++) {
     scannedUID += String(rfid.uid.uidByte[i], HEX);
@@ -88,37 +76,44 @@ void checkRFID() {
   Serial.print("🔄 Scanned Card UID: ");
   Serial.println(scannedUID);
 
-  // Check if scanned UID matches authorized UID
   if (scannedUID == authorizedUID) { 
     Serial.println("✅ Authorized Card Detected!");
 
-    // Toggle lock state **BEFORE** setting pin values
     lockState = !lockState; 
+    digitalWrite(LOCK_PIN, lockState ? HIGH : LOW);
 
-    if (!lockState) { 
-      // Unlock the door
-      digitalWrite(LOCK_PIN, LOW);  // Relay ON (active-low unlock)
+    if (!lockState) {
       Serial.println("🔓 Door Unlocked.");
-      
-      // Automatically lock after 5 seconds
-      delay(5000);  
-      digitalWrite(LOCK_PIN, HIGH); // Relay OFF (active-low lock)
+      delay(5000);
+      digitalWrite(LOCK_PIN, HIGH);
       lockState = true;
       Serial.println("🔒 Door Automatically Locked!");
     } else {
-      // Lock the door manually
-      digitalWrite(LOCK_PIN, HIGH); // Relay OFF (active-low lock)
       Serial.println("🔒 Door Locked.");
     }
   } else {
     Serial.println("❌ Access Denied!");
   }
 
-  // Halt the RFID card
+  // Reset RFID reader for next scan (makes detection faster)
   rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
 }
 
-// ✅ API lock state check (every 2s)
+// ✅ Optimized Hall Sensor Check
+void checkHallSensor() {
+  bool penAvailable = digitalRead(HALL_SENSOR_PIN) == LOW;
+  
+  if (penAvailable != lastPenState) {
+    lastPenState = penAvailable;
+    sendPenStatusUpdate(penAvailable);
+  }
+
+  digitalWrite(LED_PIN, penAvailable ? HIGH : LOW);
+  Serial.println(penAvailable ? "⚫ Pen Detected - LED ON" : "🔵 Pen Not Detected - LED OFF");
+}
+
+// ✅ Optimized API Check (Runs Every 2s)
 void checkLockStateFromAPI() {
   if (millis() - lastApiCheckTime < apiCheckInterval) {
     return;
@@ -147,7 +142,7 @@ void checkLockStateFromAPI() {
   }
 }
 
-// ✅ Lock state update
+// ✅ Lock State Update
 void updateLockState(bool state) {
   lockState = state;
   digitalWrite(LOCK_PIN, state ? HIGH : LOW);
@@ -156,7 +151,7 @@ void updateLockState(bool state) {
     Serial.println("🔓 Door Unlocked!");
     sendLockStateUpdate();
     delay(5000);
-    digitalWrite(LOCK_PIN, HIGH); // Lock again after 5s
+    digitalWrite(LOCK_PIN, HIGH);
     lockState = true;
     Serial.println("🔒 Door Automatically Locked!");
   } else {
@@ -164,7 +159,7 @@ void updateLockState(bool state) {
   }
 }
 
-// ✅ Send lock update to API
+// ✅ Faster Lock Update to API
 void sendLockStateUpdate() {
   HTTPClient http;
   http.begin(API_SET_LOCK_STATE);
@@ -177,6 +172,26 @@ void sendLockStateUpdate() {
     Serial.println("✅ Lock state update sent to API!");
   } else {
     Serial.print("❌ Failed to send lock state update! Code: ");
+    Serial.println(httpResponseCode);
+  }
+  http.end();
+}
+
+// ✅ Faster Pen Status Update
+void sendPenStatusUpdate(bool penStatus) {
+  HTTPClient http;
+  String apiUrl = String(API_SET_PEN_STATUS) + (penStatus ? "false" : "true");
+  
+  http.begin(apiUrl);
+  http.addHeader("Content-Type", "application/json");
+
+  int httpResponseCode = http.PUT("{}");  
+
+  if (httpResponseCode == 200) {
+    Serial.print("✅ Pen status updated: ");
+    Serial.println(penStatus ? "PEN AVAILABLE" : "PEN NOT AVAILABLE");
+  } else {
+    Serial.print("❌ Failed to send pen status update! Code: ");
     Serial.println(httpResponseCode);
   }
   http.end();
